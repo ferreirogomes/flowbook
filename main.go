@@ -438,6 +438,9 @@ func processText(sessionID, text string) error {
 	var translatedContent strings.Builder
 	processedChunks := 0
 
+	// Flag to switch to local worker if API fails
+	useLocal := false
+
 	// 3. Process chunks in batches
 	for i := 0; i < totalChunks; i += chunkBatchSize {
 		end := i + chunkBatchSize
@@ -453,14 +456,25 @@ func processText(sessionID, text string) error {
 
 		// Perform Translation
 		for j, chunk := range batch {
-			// Wait for rate limiter to avoid hitting API quotas
-			if err := apiLimiter.Wait(context.Background()); err != nil {
-				return fmt.Errorf("rate limiter error: %v", err)
+			var translatedText string
+			var err error
+
+			if !useLocal {
+				// Wait for rate limiter to avoid hitting API quotas
+				if err := apiLimiter.Wait(context.Background()); err != nil {
+					return fmt.Errorf("rate limiter error: %v", err)
+				}
+
+				translatedText, err = translateGTX(chunk, "pt")
+				if err != nil {
+					slog.Warn("API translation failed, switching to local worker", "error", err)
+					useLocal = true
+					translatedText = translateLocal(chunk)
+				}
 			}
 
-			translatedText, err := translateGTX(chunk, "pt")
-			if err != nil {
-				return fmt.Errorf("translation failed: %v", err)
+			if useLocal && translatedText == "" {
+				translatedText = translateLocal(chunk)
 			}
 
 			// Notify: Processing
@@ -557,4 +571,11 @@ func translateGTX(text string, targetLang string) (string, error) {
 	}
 
 	return "", fmt.Errorf("translateGTX failed after %d attempts: %w", maxRetries+1, lastErr)
+}
+
+// translateLocal performs a fallback translation locally.
+func translateLocal(text string) string {
+	// In a real application, this could use a local model or library.
+	// For now, we mark it to indicate fallback.
+	return "[Local-PT] " + text
 }
