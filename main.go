@@ -9,20 +9,18 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
 	"time"
 
-	"cloud.google.com/go/translate"
 	"github.com/abadojack/whatlanggo"
 	"github.com/gorilla/websocket"
 	"github.com/ledongthuc/pdf"
 	"github.com/wmentor/epub"
-	"golang.org/x/text/language"
 	"golang.org/x/time/rate"
-	"google.golang.org/api/option"
 )
 
 // Progress message for WebSocket communication
@@ -415,21 +413,6 @@ func processText(sessionID, text string) error {
 	info := whatlanggo.Detect(text)
 	lang := info.Lang.String()
 
-	// Initialize Google Translate Client
-	ctx := context.Background()
-	var client *translate.Client
-	var err error
-
-	if apiKey := os.Getenv("GOOGLE_API_KEY"); apiKey != "" {
-		client, err = translate.NewClient(ctx, option.WithAPIKey(apiKey))
-	} else {
-		client, err = translate.NewClient(ctx)
-	}
-	if err != nil {
-		return fmt.Errorf("failed to create translate client: %v", err)
-	}
-	defer client.Close()
-
 	hub.broadcast <- Progress{SessionID: sessionID, Message: fmt.Sprintf("Language identified: %s", lang), Status: "processing", DetectedLang: lang}
 
 	// 2. Split into chunks (simple split by newline or period for demo)
@@ -469,24 +452,23 @@ func processText(sessionID, text string) error {
 		}
 
 		// Wait for rate limiter to avoid hitting API quotas
-		if err := apiLimiter.Wait(ctx); err != nil {
+		if err := apiLimiter.Wait(context.Background()); err != nil {
 			return fmt.Errorf("rate limiter error: %v", err)
 		}
 
 		// Perform Translation
-		resp, err := client.Translate(ctx, batch, language.Make("pt-BR"), nil)
-		if err != nil {
-			return fmt.Errorf("translation failed: %v", err)
-		}
+		for j, chunk := range batch {
+			translatedText, err := translateGTX(chunk, "pt")
+			if err != nil {
+				return fmt.Errorf("translation failed: %v", err)
+			}
 
-		for j, translation := range resp {
 			// Notify: Processing
-			translatedChunk := translation.Text
-			translatedContent.WriteString(translatedChunk + "\n")
+			translatedContent.WriteString(translatedText + "\n")
 			processedChunks++
 
 			// Notify: Translated
-			hub.broadcast <- Progress{SessionID: sessionID, Status: "chunk_update", ChunkIndex: i + j, ChunkStatus: "translated", TranslatedText: translatedChunk, OriginalText: batch[j]}
+			hub.broadcast <- Progress{SessionID: sessionID, Status: "chunk_update", ChunkIndex: i + j, ChunkStatus: "translated", TranslatedText: translatedText, OriginalText: chunk}
 		}
 	}
 
@@ -506,4 +488,46 @@ func processText(sessionID, text string) error {
 	}
 
 	return nil
+}
+
+// translateGTX uses the free Google Translate Extension endpoint.
+func translateGTX(text string, targetLang string) (string, error) {
+	baseURL := "https://translate.googleapis.com/translate_a/single"
+	data := url.Values{}
+	data.Set("client", "gtx")
+	data.Set("sl", "auto")
+	data.Set("tl", targetLang)
+	data.Set("dt", "t")
+	data.Set("q", text)
+
+	resp, err := http.PostForm(baseURL, data)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", err
+	}
+
+	var result []interface{}
+	if err := json.Unmarshal(body, &result); err != nil {
+		return "", err
+	}
+
+	if len(result) > 0 {
+		if inner, ok := result[0].([]interface{}); ok {
+			var sb strings.Builder
+			for _, item := range inner {
+				if part, ok := item.([]interface{}); ok && len(part) > 0 {
+					if translated, ok := part[0].(string); ok {
+						sb.WriteString(translated)
+					}
+				}
+			}
+			return sb.String(), nil
+		}
+	}
+	return "", fmt.Errorf("invalid response format from translation api")
 }
