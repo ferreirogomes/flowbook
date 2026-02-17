@@ -4,10 +4,10 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>FlowBook Translator</title>
-    <link href="https://fonts.googleapis.com/css2?family=Crimson+Text:ital,wght@0,400;0,600;0,700;1,400&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Rye&family=Spectral:ital,wght@0,400;0,600;1,400&display=swap" rel="stylesheet">
     <style>
         body { 
-            font-family: 'Crimson Text', serif; 
+            font-family: 'Spectral', serif; 
             margin: 0; 
             padding: 40px; 
             background-color: #f5e6d3; 
@@ -19,37 +19,40 @@
             max-width: 800px; 
             margin: 0 auto; 
             padding: 50px; 
-            border: 1px solid #dcd3c5; 
-            box-shadow: 0 0 0 5px #fffcf5, 0 0 0 6px #dcd3c5, 5px 5px 15px rgba(0,0,0,0.1);
+            border: 2px solid #5d4037; 
+            box-shadow: 0 0 0 5px #fffcf5, 0 0 0 8px #5d4037, 10px 10px 20px rgba(0,0,0,0.2);
             position: relative;
         }
         .container::before {
             content: "";
             display: block;
-            border-top: 2px solid #2c2c2c;
-            border-bottom: 1px solid #2c2c2c;
+            border-top: 3px double #5d4037;
+            border-bottom: 1px solid #5d4037;
             height: 3px;
             margin-bottom: 30px;
         }
         h1 {
+            font-family: 'Rye', serif;
             text-align: center;
             font-weight: 700;
-            font-size: 2.5em;
+            font-size: 3em;
             margin-bottom: 10px;
             letter-spacing: 1px;
             text-transform: uppercase;
+            color: #3e2723;
+            text-shadow: 1px 1px 0px #d4af37;
         }
         p.subtitle {
             text-align: center;
             font-style: italic;
-            color: #555;
+            color: #5d4037;
             margin-bottom: 40px;
             font-size: 1.1em;
         }
         
         /* Drag and Drop Zone */
         #drop-zone {
-            border: 2px dashed #8b7d6b;
+            border: 3px double #8b7d6b;
             background-color: #f4f0e6;
             border-radius: 4px;
             padding: 60px;
@@ -59,6 +62,7 @@
             cursor: pointer;
             margin-bottom: 20px;
             font-size: 1.2em;
+            font-family: 'Rye', serif;
         }
         #drop-zone:hover, #drop-zone.dragover { background-color: #e8e2d2; border-color: #5d4037; color: #5d4037; }
         #file-input { display: none; }
@@ -71,49 +75,89 @@
             flex-wrap: wrap; 
             margin-bottom: 15px; 
             font-weight: bold; 
-            color: #333;
-            border-top: 1px solid #dcd3c5;
-            border-bottom: 1px solid #dcd3c5;
+            color: #3e2723;
+            border-top: 2px solid #8b7d6b;
+            border-bottom: 2px solid #8b7d6b;
             padding: 15px 0;
+            font-family: 'Rye', serif;
+            font-size: 0.9em;
         }
         .info-bar > span { margin-right: 15px; margin-bottom: 5px; }
         
         /* Progress Bar */
-        .progress-container { width: 100%; background-color: #e8e2d2; border-radius: 2px; margin-bottom: 15px; border: 1px solid #dcd3c5; height: 10px; }
+        .progress-container { 
+            width: 100%; 
+            background-color: #e8e2d2; 
+            border: 2px solid #5d4037; 
+            height: 25px; 
+            margin-bottom: 15px; 
+            position: relative;
+            border-radius: 4px;
+            box-shadow: inset 0 1px 3px rgba(0,0,0,0.2);
+        }
         .progress-bar {
-            width: 0%; height: 100%; background-color: #8b7d6b; border-radius: 1px;
-            text-align: center; line-height: 10px; color: transparent; font-size: 0.9em;
+            width: 0%; 
+            height: 100%; 
+            background-color: #8b7d6b; 
+            background-image: linear-gradient(45deg,rgba(255,255,255,.15) 25%,transparent 25%,transparent 50%,rgba(255,255,255,.15) 50%,rgba(255,255,255,.15) 75%,transparent 75%,transparent);
+            background-size: 1rem 1rem;
+            text-align: center; 
+            line-height: 25px; 
+            color: #fffcf5; 
+            font-weight: bold;
+            font-size: 0.9em;
             transition: width 0.5s ease;
+            text-shadow: 1px 1px 0 #3e2723;
         }
 
         /* Chunk Grid */
-        .chunk-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(30px, 1fr)); gap: 5px; margin-top: 20px; }
+        .chunk-grid { 
+            display: grid; 
+            grid-template-columns: repeat(auto-fill, minmax(15px, 1fr)); 
+            gap: 2px; 
+            margin-top: 20px; 
+            padding: 10px;
+            border: 1px solid #dcd3c5;
+            background: #fffcf5;
+        }
         .chunk-card {
-            width: 30px; height: 30px; border: 1px solid #dcd3c5; border-radius: 2px;
-            font-size: 0.7em; display: flex; align-items: center; justify-content: center;
+            width: 100%; 
+            padding-bottom: 100%; /* Aspect ratio 1:1 */
+            border: 1px solid #dcd3c5; 
+            border-radius: 1px;
             transition: background 0.3s;
             position: relative;
-            cursor: help; /* Indicate hover for title */
-            background: #fff;
-            box-shadow: 1px 1px 3px rgba(0,0,0,0.05);
         }
-        .chunk-card.waiting { background: #f9f7f1; color: #aaa; }
-        .chunk-card.processing { background: #fff8e1; border-color: #eecfa1; color: #8d6e63; }
-        .chunk-card.translated { background: #dcedc8; border-color: #aed581; color: #33691e; }
+        .chunk-card.waiting { background: #e0dcd0; }
+        .chunk-card.processing { background: #d4af37; box-shadow: 0 0 5px #d4af37; z-index: 1; }
+        .chunk-card.translated { background: #5d4037; border-color: #3e2723; }
         
         /* Download Button */
         #download-btn {
-            display: none; width: 100%; padding: 15px; background-color: #5d4037; color: #fffcf5;
-            text-align: center; text-decoration: none; font-size: 1.2em; border-radius: 2px; margin-top: 30px;
-            text-transform: uppercase; letter-spacing: 1px; box-shadow: 0 4px 6px rgba(0,0,0,0.2);
+            display: none; 
+            width: 100%; 
+            padding: 15px; 
+            background-color: #5d4037; 
+            color: #fffcf5;
+            text-align: center; 
+            text-decoration: none; 
+            font-size: 1.4em; 
+            font-family: 'Rye', serif;
+            border: 2px solid #3e2723;
+            border-radius: 4px; 
+            margin-top: 30px;
+            text-transform: uppercase; 
+            letter-spacing: 2px; 
+            box-shadow: 0 4px 6px rgba(0,0,0,0.3);
             box-sizing: border-box;
+            transition: all 0.2s;
         }
-        #download-btn:hover { background-color: #3e2723; }
+        #download-btn:hover { background-color: #3e2723; transform: translateY(-2px); box-shadow: 0 6px 8px rgba(0,0,0,0.4); }
 
         /* Preview Area */
         #preview-container {
             margin-top: 30px;
-            border: 1px solid #dcd3c5;
+            border: 2px solid #8b7d6b;
             background: #fffcf5;
             padding: 25px;
             box-shadow: inset 0 0 30px rgba(139, 125, 107, 0.1);
@@ -128,9 +172,11 @@
             background: #fffcf5;
             padding: 0 10px;
             font-size: 0.8em;
-            color: #8b7d6b;
+            color: #5d4037;
             font-weight: bold;
             letter-spacing: 1px;
+            font-family: 'Rye', serif;
+            border: 1px solid #8b7d6b;
         }
         .preview-item {
             margin-bottom: 15px;
@@ -139,7 +185,7 @@
         }
         .preview-original {
             font-style: italic;
-            color: #666;
+            color: #795548;
             font-size: 0.9em;
             margin-bottom: 5px;
         }
@@ -196,6 +242,8 @@
     let currentSessionID = null;
     let totalChunks = 0;
     let translatedChunks = 0;
+    const CHUNKS_PER_SQUARE = 1000;
+    let squareData = [];
 
     // Drag & Drop Events
     dropZone.addEventListener('click', () => fileInput.click());
@@ -223,6 +271,7 @@
         previewContent.innerHTML = '';
         totalChunks = 0;
         translatedChunks = 0;
+        squareData = [];
 
         // Connect WS
         if (!socket || socket.readyState !== WebSocket.OPEN) {
@@ -280,12 +329,16 @@
         if (msg.total_chunks !== undefined && msg.total_chunks > 0) {
             totalChunks = msg.total_chunks;
             totalChunksDisplay.textContent = `Chunks: ${totalChunks}`;
+            
+            const numSquares = Math.ceil(totalChunks / CHUNKS_PER_SQUARE);
+            squareData = new Array(numSquares).fill(0).map(() => ({ translated: 0 }));
+
             chunkContainer.innerHTML = ''; // Clear previous chunks
-            for (let i = 0; i < totalChunks; i++) {
+            for (let i = 0; i < numSquares; i++) {
                 const div = document.createElement('div');
-                div.id = `chunk-${i}`;
+                div.id = `square-${i}`;
                 div.className = 'chunk-card waiting';
-                // div.textContent = i + 1; // Optional: show chunk number
+                div.title = `Chunks ${i * CHUNKS_PER_SQUARE + 1} - ${Math.min((i + 1) * CHUNKS_PER_SQUARE, totalChunks)}`;
                 chunkContainer.appendChild(div);
             }
             updateGlobalProgress();
@@ -293,13 +346,25 @@
 
         // Update Chunk Status
         if (msg.status === 'chunk_update') {
-            const el = document.getElementById(`chunk-${msg.chunk_index}`);
-            if (el) {
-                el.className = `chunk-card ${msg.chunk_status}`;
-                if (msg.chunk_status === 'translated') {
-                    translatedChunks++;
-                    updateGlobalProgress();
-                    el.title = msg.translated_text; // Show translated text on hover
+            const squareIndex = Math.floor(msg.chunk_index / CHUNKS_PER_SQUARE);
+            const el = document.getElementById(`square-${squareIndex}`);
+            
+            if (msg.chunk_status === 'translated') {
+                translatedChunks++;
+                updateGlobalProgress();
+                
+                if (el && squareData[squareIndex]) {
+                    squareData[squareIndex].translated++;
+                    
+                    const totalInSquare = (squareIndex === squareData.length - 1) 
+                        ? totalChunks - (squareIndex * CHUNKS_PER_SQUARE) 
+                        : CHUNKS_PER_SQUARE;
+
+                    if (squareData[squareIndex].translated >= totalInSquare) {
+                        el.className = 'chunk-card translated';
+                    } else {
+                        el.className = 'chunk-card processing';
+                    }
 
                     // Update Preview (First 5 chunks)
                     if (msg.chunk_index < 5) {
@@ -336,6 +401,10 @@
                             }
                         }
                     }
+                }
+            } else if (msg.chunk_status === 'processing') {
+                if (el && el.className.includes('waiting')) {
+                    el.className = 'chunk-card processing';
                 }
             }
         }

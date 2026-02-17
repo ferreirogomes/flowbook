@@ -500,34 +500,61 @@ func translateGTX(text string, targetLang string) (string, error) {
 	data.Set("dt", "t")
 	data.Set("q", text)
 
-	resp, err := http.PostForm(baseURL, data)
-	if err != nil {
-		return "", err
-	}
-	defer resp.Body.Close()
+	var lastErr error
+	const maxRetries = 3
 
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return "", err
-	}
+	for attempt := 0; attempt <= maxRetries; attempt++ {
+		if attempt > 0 {
+			slog.Warn("retrying translation request", "attempt", attempt, "error", lastErr)
+			// Exponential backoff: 500ms, 1s, 2s
+			time.Sleep(time.Duration(500*(1<<(attempt-1))) * time.Millisecond)
+		}
 
-	var result []interface{}
-	if err := json.Unmarshal(body, &result); err != nil {
-		return "", err
-	}
+		resp, err := http.PostForm(baseURL, data)
+		if err != nil {
+			lastErr = fmt.Errorf("request failed: %w", err)
+			continue
+		}
 
-	if len(result) > 0 {
-		if inner, ok := result[0].([]interface{}); ok {
-			var sb strings.Builder
-			for _, item := range inner {
-				if part, ok := item.([]interface{}); ok && len(part) > 0 {
-					if translated, ok := part[0].(string); ok {
-						sb.WriteString(translated)
+		body, err := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if err != nil {
+			lastErr = fmt.Errorf("failed to read body: %w", err)
+			continue
+		}
+
+		if resp.StatusCode != http.StatusOK {
+			lastErr = fmt.Errorf("API returned non-200 status: %d", resp.StatusCode)
+			continue
+		}
+
+		// Check for HTML response which causes the JSON error
+		if len(body) > 0 && bytes.HasPrefix(bytes.TrimSpace(body), []byte("<")) {
+			lastErr = fmt.Errorf("API returned HTML (likely rate limited)")
+			continue
+		}
+
+		var result []interface{}
+		if err := json.Unmarshal(body, &result); err != nil {
+			lastErr = fmt.Errorf("json unmarshal failed: %w", err)
+			continue
+		}
+
+		if len(result) > 0 {
+			if inner, ok := result[0].([]interface{}); ok {
+				var sb strings.Builder
+				for _, item := range inner {
+					if part, ok := item.([]interface{}); ok && len(part) > 0 {
+						if translated, ok := part[0].(string); ok {
+							sb.WriteString(translated)
+						}
 					}
 				}
+				return sb.String(), nil
 			}
-			return sb.String(), nil
 		}
+		lastErr = fmt.Errorf("unexpected JSON structure")
 	}
-	return "", fmt.Errorf("invalid response format from translation api")
+
+	return "", fmt.Errorf("translateGTX failed after %d attempts: %w", maxRetries+1, lastErr)
 }
