@@ -30,6 +30,7 @@ type Progress struct {
 	TotalChunks    int    `json:"total_chunks,omitempty"`
 	ChunkStatus    string `json:"chunk_status,omitempty"` // "waiting", "processing", "translated"
 	TranslatedText string `json:"translated_text,omitempty"`
+	OriginalText   string `json:"original_text,omitempty"`
 	DownloadURL    string `json:"download_url,omitempty"`
 	EstimatedTime  string `json:"estimated_time,omitempty"` // New field for estimated time
 }
@@ -394,7 +395,7 @@ func processText(sessionID, text string) error {
 			processedChunks++
 
 			// Notify: Translated
-			hub.broadcast <- Progress{SessionID: sessionID, Status: "chunk_update", ChunkIndex: i + j, ChunkStatus: "translated", TranslatedText: translatedChunk}
+			hub.broadcast <- Progress{SessionID: sessionID, Status: "chunk_update", ChunkIndex: i + j, ChunkStatus: "translated", TranslatedText: translatedChunk, OriginalText: chunk}
 		}
 	}
 

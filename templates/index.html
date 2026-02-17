@@ -132,9 +132,20 @@
             font-weight: bold;
             letter-spacing: 1px;
         }
-        #preview-content p {
-            margin-bottom: 0.5em;
-            text-indent: 1em;
+        .preview-item {
+            margin-bottom: 15px;
+            border-bottom: 1px dashed #dcd3c5;
+            padding-bottom: 10px;
+        }
+        .preview-original {
+            font-style: italic;
+            color: #666;
+            font-size: 0.9em;
+            margin-bottom: 5px;
+        }
+        .preview-translated {
+            font-weight: 600;
+            color: #3e2723;
         }
     </style>
 </head>
@@ -295,9 +306,19 @@
                         previewContainer.style.display = 'block';
                         // Check if paragraph already exists to avoid duplicates
                         if (!document.getElementById(`preview-p-${msg.chunk_index}`)) {
-                            const p = document.createElement('p');
-                            p.id = `preview-p-${msg.chunk_index}`;
-                            p.textContent = msg.translated_text;
+                            const div = document.createElement('div');
+                            div.id = `preview-p-${msg.chunk_index}`;
+                            div.className = 'preview-item';
+                            
+                            const originalDiv = document.createElement('div');
+                            originalDiv.className = 'preview-original';
+                            originalDiv.textContent = msg.original_text;
+                            div.appendChild(originalDiv);
+
+                            const translatedDiv = document.createElement('div');
+                            translatedDiv.className = 'preview-translated';
+                            translatedDiv.textContent = msg.translated_text;
+                            div.appendChild(translatedDiv);
                             
                             // Insert in order
                             const paragraphs = previewContent.children;
@@ -305,13 +326,13 @@
                             for (let i = 0; i < paragraphs.length; i++) {
                                 const idx = parseInt(paragraphs[i].id.replace('preview-p-', ''), 10);
                                 if (msg.chunk_index < idx) {
-                                    previewContent.insertBefore(p, paragraphs[i]);
+                                    previewContent.insertBefore(div, paragraphs[i]);
                                     inserted = true;
                                     break;
                                 }
                             }
                             if (!inserted) {
-                                previewContent.appendChild(p);
+                                previewContent.appendChild(div);
                             }
                         }
                     }
