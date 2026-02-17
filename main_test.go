@@ -14,8 +14,6 @@ import (
 	"sync"
 	"testing"
 	"time"
-
-	"github.com/gorilla/websocket"
 )
 
 // TestMain manages setup and teardown for all tests in the package.
@@ -176,13 +174,13 @@ func TestTranslateHandler(t *testing.T) {
 			originalHub := hub
 			testHub := Hub{
 				broadcast:  make(chan Progress, 5), // Buffered channel
-				register:   make(chan *websocket.Conn),
-				unregister: make(chan *websocket.Conn),
-				clients:    make(map[string]*websocket.Conn),
+				register:   make(chan *Client),
+				unregister: make(chan *Client),
+				clients:    make(map[*Client]bool),
 				mutex:      sync.Mutex{},
 			}
 			hub = testHub
-			go hub.run()
+			// go hub.run() // Removed to avoid race condition with test reading from broadcast channel
 			defer func() { hub = originalHub }() // Restore original hub
 
 			req := createMultipartRequest(tc.filename, tc.fileContent)

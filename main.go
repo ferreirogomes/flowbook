@@ -44,46 +44,84 @@ const numWorkers = 4
 
 var jobs = make(chan Job, 100) // Buffered channel for jobs
 
+// Client is a middleman between the websocket connection and the hub.
+type Client struct {
+	hub  *Hub
+	conn *websocket.Conn
+	send chan []byte
+}
+
+// writePump pumps messages from the hub to the websocket connection.
+func (c *Client) writePump() {
+	defer func() {
+		c.conn.Close()
+	}()
+	for {
+		select {
+		case message, ok := <-c.send:
+			if !ok {
+				// The hub closed the channel.
+				c.conn.WriteMessage(websocket.CloseMessage, []byte{})
+				return
+			}
+
+			w, err := c.conn.NextWriter(websocket.TextMessage)
+			if err != nil {
+				return
+			}
+			w.Write(message)
+
+			if err := w.Close(); err != nil {
+				return
+			}
+		}
+	}
+}
+
 // Hub maintains the set of active clients and broadcasts messages to the
 // clients.
 type Hub struct {
-	clients    map[string]*websocket.Conn
+	clients    map[*Client]bool
 	broadcast  chan Progress
-	register   chan *websocket.Conn
-	unregister chan *websocket.Conn
+	register   chan *Client
+	unregister chan *Client
 	mutex      sync.Mutex
 }
 
 var hub = Hub{
 	broadcast:  make(chan Progress),
-	register:   make(chan *websocket.Conn),
-	unregister: make(chan *websocket.Conn),
-	clients:    make(map[string]*websocket.Conn),
+	register:   make(chan *Client),
+	unregister: make(chan *Client),
+	clients:    make(map[*Client]bool),
 }
 
 func (h *Hub) run() {
 	for {
 		select {
-		case conn := <-h.register:
+		case client := <-h.register:
 			h.mutex.Lock()
-			h.clients[conn.RemoteAddr().String()] = conn
+			h.clients[client] = true
 			h.mutex.Unlock()
-		case conn := <-h.unregister:
+		case client := <-h.unregister:
 			h.mutex.Lock()
-			if _, ok := h.clients[conn.RemoteAddr().String()]; ok {
-				delete(h.clients, conn.RemoteAddr().String())
-				if err := conn.Close(); err != nil {
-					log.Printf("error closing connection: %v", err)
-				}
+			if _, ok := h.clients[client]; ok {
+				delete(h.clients, client)
+				close(client.send)
 			}
 			h.mutex.Unlock()
 		case progress := <-h.broadcast:
+			data, err := json.Marshal(progress)
+			if err != nil {
+				log.Printf("json marshal error: %v", err)
+				continue
+			}
 			h.mutex.Lock()
-			for _, conn := range h.clients {
-				// This is a simple broadcast, for a real app you'd target specific sessions
-				if err := conn.WriteJSON(progress); err != nil {
-					log.Printf("error: %v", err)
-					h.unregister <- conn
+			for client := range h.clients {
+				select {
+				case client.send <- data:
+				default:
+					close(client.send)
+					delete(h.clients, client)
 				}
 			}
 			h.mutex.Unlock()
@@ -105,7 +143,12 @@ func serveWs(w http.ResponseWriter, r *http.Request) {
 		log.Println(err)
 		return
 	}
-	hub.register <- conn
+	client := &Client{hub: &hub, conn: conn, send: make(chan []byte, 256)}
+	client.hub.register <- client
+
+	// Allow collection of memory referenced by the caller by doing all work in
+	// new goroutines.
+	go client.writePump()
 }
 
 func main() {
