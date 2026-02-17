@@ -3,7 +3,7 @@ module flowbook
 go 1.25.6
 
 require (
-	github.com/abadojack/whatlanggo v1.1.0
+	github.com/abadojack/whatlanggo v1.0.1
 	github.com/gorilla/websocket v1.5.3
 	github.com/ledongthuc/pdf v0.0.0-20250511090121-5959a4027728
 	github.com/wmentor/epub v1.0.1
