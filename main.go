@@ -51,8 +51,8 @@ const simulatedChunkProcessTime = 100 * time.Millisecond // Time to process one 
 
 var jobs = make(chan Job, 100) // Buffered channel for jobs
 
-// Global rate limiter to respect API quotas (e.g., 10 requests/second)
-var apiLimiter = rate.NewLimiter(rate.Every(100*time.Millisecond), 1)
+// Global rate limiter to respect API quotas (e.g., 4 requests/second)
+var apiLimiter = rate.NewLimiter(rate.Every(500*time.Millisecond), 1)
 
 // AppMetrics holds application metrics.
 type AppMetrics struct {
@@ -451,13 +451,13 @@ func processText(sessionID, text string) error {
 			hub.broadcast <- Progress{SessionID: sessionID, Status: "chunk_update", ChunkIndex: j, ChunkStatus: "processing"}
 		}
 
-		// Wait for rate limiter to avoid hitting API quotas
-		if err := apiLimiter.Wait(context.Background()); err != nil {
-			return fmt.Errorf("rate limiter error: %v", err)
-		}
-
 		// Perform Translation
 		for j, chunk := range batch {
+			// Wait for rate limiter to avoid hitting API quotas
+			if err := apiLimiter.Wait(context.Background()); err != nil {
+				return fmt.Errorf("rate limiter error: %v", err)
+			}
+
 			translatedText, err := translateGTX(chunk, "pt")
 			if err != nil {
 				return fmt.Errorf("translation failed: %v", err)
