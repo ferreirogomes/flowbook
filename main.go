@@ -31,6 +31,7 @@ type Progress struct {
 	ChunkStatus    string `json:"chunk_status,omitempty"` // "waiting", "processing", "translated"
 	TranslatedText string `json:"translated_text,omitempty"`
 	DownloadURL    string `json:"download_url,omitempty"`
+	EstimatedTime  string `json:"estimated_time,omitempty"` // New field for estimated time
 }
 
 // Job represents a file to be processed by a worker.
@@ -41,6 +42,8 @@ type Job struct {
 }
 
 const numWorkers = 4
+const chunkBatchSize = 10                                // Process 10 chunks at a time
+const simulatedChunkProcessTime = 100 * time.Millisecond // Time to process one chunk (for estimation)
 
 var jobs = make(chan Job, 100) // Buffered channel for jobs
 
@@ -359,24 +362,40 @@ func processText(sessionID, text string) error {
 		validChunks = []string{"No text content found."}
 	}
 
-	total := len(validChunks)
-	hub.broadcast <- Progress{SessionID: sessionID, Message: "Starting translation...", Status: "processing", TotalChunks: total}
+	totalChunks := len(validChunks)
+	// Calculate estimated time: (total chunks) * simulatedChunkProcessTime
+	estimatedTime := time.Duration(totalChunks) * simulatedChunkProcessTime
+
+	hub.broadcast <- Progress{SessionID: sessionID, Message: "Starting translation...", Status: "processing", TotalChunks: totalChunks, EstimatedTime: estimatedTime.String()}
 
 	var translatedContent strings.Builder
+	processedChunks := 0
 
-	// 3. Process chunks
-	for i, chunk := range validChunks {
-		// Notify: Processing
-		hub.broadcast <- Progress{SessionID: sessionID, Status: "chunk_update", ChunkIndex: i, ChunkStatus: "processing"}
+	// 3. Process chunks in batches
+	for i := 0; i < totalChunks; i += chunkBatchSize {
+		end := i + chunkBatchSize
+		if end > totalChunks {
+			end = totalChunks
+		}
+		batch := validChunks[i:end]
 
-		// Simulate translation delay
-		time.Sleep(500 * time.Millisecond)
-		translatedChunk := "[TR] " + chunk // Mock translation
+		// Notify all chunks in the current batch as "processing"
+		for j := i; j < end; j++ {
+			hub.broadcast <- Progress{SessionID: sessionID, Status: "chunk_update", ChunkIndex: j, ChunkStatus: "processing"}
+		}
 
-		translatedContent.WriteString(translatedChunk + "\n")
+		// Simulate translation delay for the batch
+		time.Sleep(time.Duration(len(batch)) * simulatedChunkProcessTime)
 
-		// Notify: Translated
-		hub.broadcast <- Progress{SessionID: sessionID, Status: "chunk_update", ChunkIndex: i, ChunkStatus: "translated", TranslatedText: translatedChunk}
+		for j, chunk := range batch {
+			// Notify: Processing
+			translatedChunk := "[TR] " + chunk // Mock translation
+			translatedContent.WriteString(translatedChunk + "\n")
+			processedChunks++
+
+			// Notify: Translated
+			hub.broadcast <- Progress{SessionID: sessionID, Status: "chunk_update", ChunkIndex: i + j, ChunkStatus: "translated", TranslatedText: translatedChunk}
+		}
 	}
 
 	// 4. Save to output file

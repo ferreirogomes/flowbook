@@ -160,9 +160,9 @@ func TestTranslateHandler(t *testing.T) {
 			filename:    "valid.pdf",
 			fileContent: createMinimalPDF(),
 			expectedMsgs: []Progress{
-				{SessionID: "valid.pdf", Message: "Language identified: English", Status: "processing"},
-				{SessionID: "valid.pdf", Message: "Starting translation...", Status: "processing"},
-				{SessionID: "valid.pdf", Status: "chunk_update"}, // Processing
+				{SessionID: "valid.pdf", Message: "Language identified: English", Status: "processing", DetectedLang: "English"},
+				{SessionID: "valid.pdf", Message: "Starting translation...", Status: "processing", TotalChunks: 1}, // EstimatedTime will be dynamic
+				{SessionID: "valid.pdf", Status: "chunk_update", ChunkIndex: 0, ChunkStatus: "processing"},
 				{SessionID: "valid.pdf", Status: "completed"},
 			},
 		},
