@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"html/template"
 	"io"
-	"log"
+	"log/slog"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -56,6 +56,16 @@ var jobs = make(chan Job, 100) // Buffered channel for jobs
 // Global rate limiter to respect API quotas (e.g., 10 requests/second)
 var apiLimiter = rate.NewLimiter(rate.Every(100*time.Millisecond), 1)
 
+// AppMetrics holds application metrics.
+type AppMetrics struct {
+	mu                sync.Mutex
+	ActiveConnections int64
+	JobsProcessed     int64
+	JobsFailed        int64
+}
+
+var metrics AppMetrics
+
 const (
 	// Time allowed to write a message to the peer.
 	writeWait = 10 * time.Second
@@ -93,7 +103,7 @@ func (c *Client) readPump() {
 		_, _, err := c.conn.ReadMessage()
 		if err != nil {
 			if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseAbnormalClosure) {
-				log.Printf("error: %v", err)
+				slog.Error("websocket read error", "error", err)
 			}
 			break
 		}
@@ -159,17 +169,23 @@ func (h *Hub) run() {
 			h.mutex.Lock()
 			h.clients[client] = true
 			h.mutex.Unlock()
+			metrics.mu.Lock()
+			metrics.ActiveConnections++
+			metrics.mu.Unlock()
 		case client := <-h.unregister:
 			h.mutex.Lock()
 			if _, ok := h.clients[client]; ok {
 				delete(h.clients, client)
 				close(client.send)
+				metrics.mu.Lock()
+				metrics.ActiveConnections--
+				metrics.mu.Unlock()
 			}
 			h.mutex.Unlock()
 		case progress := <-h.broadcast:
 			data, err := json.Marshal(progress)
 			if err != nil {
-				log.Printf("json marshal error: %v", err)
+				slog.Error("json marshal error", "error", err)
 				continue
 			}
 			h.mutex.Lock()
@@ -197,7 +213,7 @@ var upgrader = websocket.Upgrader{
 func serveWs(w http.ResponseWriter, r *http.Request) {
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
-		log.Println(err)
+		slog.Error("websocket upgrade error", "error", err)
 		return
 	}
 	client := &Client{hub: &hub, conn: conn, send: make(chan []byte, 256)}
@@ -210,20 +226,35 @@ func serveWs(w http.ResponseWriter, r *http.Request) {
 }
 
 func main() {
+	// Setup structured logging
+	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
+	slog.SetDefault(logger)
+
 	// Ensure directories exist
 	os.MkdirAll("uploads", 0755)
 	os.MkdirAll("outputs", 0755)
 
 	startWorkerPool()
 	go hub.run()
-	http.HandleFunc("/", homeHandler)
-	http.HandleFunc("/translate", translateHandler)
-	http.HandleFunc("/download", downloadHandler)
+	http.HandleFunc("/", withLogging(homeHandler))
+	http.HandleFunc("/translate", withLogging(translateHandler))
+	http.HandleFunc("/download", withLogging(downloadHandler))
+	http.HandleFunc("/health", withLogging(healthHandler))
+	http.HandleFunc("/metrics", withLogging(metricsHandler))
 	http.HandleFunc("/ws", serveWs)
 
-	fmt.Println("Starting server on :8080")
+	slog.Info("Starting server on :8080")
 	if err := http.ListenAndServe(":8080", nil); err != nil {
-		log.Fatal(err)
+		slog.Error("server failed", "error", err)
+		os.Exit(1)
+	}
+}
+
+func withLogging(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		start := time.Now()
+		next(w, r)
+		slog.Info("http request", "method", r.Method, "path", r.URL.Path, "remote", r.RemoteAddr, "duration", time.Since(start))
 	}
 }
 
@@ -235,23 +266,34 @@ func startWorkerPool() {
 
 func worker(id int, jobs <-chan Job) {
 	for job := range jobs {
-		log.Printf("worker %d started job %s", id, job.SessionID)
-		defer os.Remove(job.FilePath) // Clean up the temp file after processing
+		func() {
+			slog.Info("worker started job", "worker_id", id, "session_id", job.SessionID)
+			defer os.Remove(job.FilePath) // Clean up the temp file after processing
 
-		var procErr error
-		switch job.Ext {
-		case ".pdf":
-			procErr = processPDF(job.FilePath, job.SessionID)
-		case ".epub":
-			procErr = processEPUB(job.FilePath, job.SessionID)
-		default:
-			hub.broadcast <- Progress{SessionID: job.SessionID, Message: "Unsupported file type: " + job.Ext, Status: "error"}
-		}
+			var procErr error
+			switch job.Ext {
+			case ".pdf":
+				procErr = processPDF(job.FilePath, job.SessionID)
+			case ".epub":
+				procErr = processEPUB(job.FilePath, job.SessionID)
+			default:
+				slog.Warn("unsupported file type", "ext", job.Ext, "session_id", job.SessionID)
+				hub.broadcast <- Progress{SessionID: job.SessionID, Message: "Unsupported file type: " + job.Ext, Status: "error"}
+			}
 
-		if procErr != nil {
-			hub.broadcast <- Progress{SessionID: job.SessionID, Message: "Error processing file: " + procErr.Error(), Status: "error"}
-		}
-		log.Printf("worker %d finished job %s", id, job.SessionID)
+			if procErr != nil {
+				slog.Error("error processing file", "session_id", job.SessionID, "error", procErr)
+				hub.broadcast <- Progress{SessionID: job.SessionID, Message: "Error processing file: " + procErr.Error(), Status: "error"}
+				metrics.mu.Lock()
+				metrics.JobsFailed++
+				metrics.mu.Unlock()
+			} else {
+				metrics.mu.Lock()
+				metrics.JobsProcessed++
+				metrics.mu.Unlock()
+			}
+			slog.Info("worker finished job", "worker_id", id, "session_id", job.SessionID)
+		}()
 	}
 }
 
@@ -274,6 +316,24 @@ func downloadHandler(w http.ResponseWriter, r *http.Request) {
 	cleanFilename := filepath.Base(filename)
 	filePath := filepath.Join("outputs", cleanFilename)
 	http.ServeFile(w, r, filePath)
+}
+
+func healthHandler(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte("OK"))
+}
+
+func metricsHandler(w http.ResponseWriter, r *http.Request) {
+	metrics.mu.Lock()
+	stats := map[string]int64{
+		"active_connections": metrics.ActiveConnections,
+		"jobs_processed":     metrics.JobsProcessed,
+		"jobs_failed":        metrics.JobsFailed,
+	}
+	metrics.mu.Unlock()
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(stats)
 }
 
 func translateHandler(w http.ResponseWriter, r *http.Request) {
