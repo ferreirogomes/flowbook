@@ -1,6 +1,8 @@
 package main
 
 import (
+	"bytes"
+	"encoding/json"
 	"fmt"
 	"html/template"
 	"io"
@@ -9,13 +11,87 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 
+	"github.com/gorilla/websocket"
+	"github.com/ledongthuc/pdf"
 	"github.com/wmentor/epub"
 )
 
+// Progress message for WebSocket communication
+type Progress struct {
+	SessionID string `json:"session_id"`
+	Message   string `json:"message"`
+	Status    string `json:"status"` // e.g., "processing", "completed", "error"
+}
+
+// Hub maintains the set of active clients and broadcasts messages to the
+// clients.
+type Hub struct {
+	clients    map[string]*websocket.Conn
+	broadcast  chan Progress
+	register   chan *websocket.Conn
+	unregister chan *websocket.Conn
+	mutex      sync.Mutex
+}
+
+var hub = Hub{
+	broadcast:  make(chan Progress),
+	register:   make(chan *websocket.Conn),
+	unregister: make(chan *websocket.Conn),
+	clients:    make(map[string]*websocket.Conn),
+}
+
+func (h *Hub) run() {
+	for {
+		select {
+		case conn := <-h.register:
+			h.mutex.Lock()
+			h.clients[conn.RemoteAddr().String()] = conn
+			h.mutex.Unlock()
+		case conn := <-h.unregister:
+			h.mutex.Lock()
+			if _, ok := h.clients[conn.RemoteAddr().String()]; ok {
+				delete(h.clients, conn.RemoteAddr().String())
+				close(conn.CloseHandler())
+			}
+			h.mutex.Unlock()
+		case progress := <-h.broadcast:
+			h.mutex.Lock()
+			for _, conn := range h.clients {
+				// This is a simple broadcast, for a real app you'd target specific sessions
+				if err := conn.WriteJSON(progress); err != nil {
+					log.Printf("error: %v", err)
+					h.unregister <- conn
+				}
+			}
+			h.mutex.Unlock()
+		}
+	}
+}
+
+var upgrader = websocket.Upgrader{
+	ReadBufferSize:  1024,
+	WriteBufferSize: 1024,
+	CheckOrigin: func(r *http.Request) bool {
+		return true // Allow all connections
+	},
+}
+
+func serveWs(w http.ResponseWriter, r *http.Request) {
+	conn, err := upgrader.Upgrade(w, r, nil)
+	if err != nil {
+		log.Println(err)
+		return
+	}
+	hub.register <- conn
+}
+
 func main() {
+	go hub.run()
 	http.HandleFunc("/", homeHandler)
 	http.HandleFunc("/translate", translateHandler)
+	http.HandleFunc("/ws", serveWs)
 
 	fmt.Println("Starting server on :8080")
 	if err := http.ListenAndServe(":8080", nil); err != nil {
@@ -62,45 +138,67 @@ func translateHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	sessionID := handler.Filename // Use filename as a simple session ID for now
 
-	// Process the file based on its type
-	ext := filepath.Ext(handler.Filename)
-	var procErr error
-	switch ext {
-	case ".pdf":
-		procErr = processPDF(tmpfile.Name())
-	case ".epub":
-		procErr = processEPUB(tmpfile.Name())
-	default:
-		http.Error(w, "Unsupported file type: "+ext, http.StatusBadRequest)
-		return
-	}
+	// Start processing in a goroutine
+	go func() {
+		ext := filepath.Ext(handler.Filename)
+		var procErr error
+		switch ext {
+		case ".pdf":
+			procErr = processPDF(tmpfile.Name(), sessionID)
+		case ".epub":
+			procErr = processEPUB(tmpfile.Name(), sessionID)
+		default:
+			hub.broadcast <- Progress{SessionID: sessionID, Message: "Unsupported file type: " + ext, Status: "error"}
+			return
+		}
 
-	if procErr != nil {
-		http.Error(w, "Error processing file: "+procErr.Error(), http.StatusInternalServerError)
-		return
-	}
+		if procErr != nil {
+			hub.broadcast <- Progress{SessionID: sessionID, Message: "Error processing file: " + procErr.Error(), Status: "error"}
+			return
+		}
+		hub.broadcast <- Progress{SessionID: sessionID, Message: "File processed successfully.", Status: "completed"}
+	}()
 
-	fmt.Fprintf(w, "File '%s' uploaded and processed successfully.", handler.Filename)
+	// Respond to the initial HTTP request immediately
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{"session_id": sessionID})
 }
 
-func processPDF(filePath string) error {
-	// Placeholder for PDF processing logic
-	log.Printf("Processing PDF file: %s", filePath)
+func processPDF(filePath string, sessionID string) error {
+	hub.broadcast <- Progress{SessionID: sessionID, Message: "Processing PDF file...", Status: "processing"}
+
+	f, r, err := pdf.Open(filePath)
+	if err != nil {
+		return fmt.Errorf("could not open pdf file: %w", err)
+	}
+	defer f.Close()
+
+	var buf bytes.Buffer
+    b, err := r.GetPlainText()
+    if err != nil {
+		return fmt.Errorf("could not get plain text from pdf: %w", err)
+    }
+    buf.ReadFrom(b)
+
+	hub.broadcast <- Progress{SessionID: sessionID, Message: "Text extracted. Translating...", Status: "processing"}
+	// Placeholder for translation
+	log.Printf("Extracted Text from %s:\n%s", filePath, buf.String())
+
 	return nil
 }
 
-func processEPUB(filePath string) error {
-	log.Printf("Processing EPUB file: %s", filePath)
+func processEPUB(filePath string, sessionID string) error {
+	hub.broadcast <- Progress{SessionID: sessionID, Message: "Processing EPUB file...", Status: "processing"}
 
 	var sb strings.Builder
 	if err := epub.ToTxt(filePath, &sb); err != nil {
-		log.Printf("Error processing EPUB file %s: %v", filePath, err)
 		return fmt.Errorf("could not process epub file: %w", err)
 	}
 
-	// For now, just log the extracted text.
-	// In the future, this text will be sent for translation.
+	hub.broadcast <- Progress{SessionID: sessionID, Message: "Text extracted. Translating...", Status: "processing"}
+	// Placeholder for translation
 	log.Printf("Extracted Text from %s:\n%s", filePath, sb.String())
 
 	return nil
