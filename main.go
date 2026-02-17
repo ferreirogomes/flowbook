@@ -12,7 +12,9 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 
+	"github.com/abadojack/whatlanggo"
 	"github.com/gorilla/websocket"
 	"github.com/ledongthuc/pdf"
 	"github.com/wmentor/epub"
@@ -20,10 +22,27 @@ import (
 
 // Progress message for WebSocket communication
 type Progress struct {
-	SessionID string `json:"session_id"`
-	Message   string `json:"message"`
-	Status    string `json:"status"` // e.g., "processing", "completed", "error"
+	SessionID      string `json:"session_id"`
+	Message        string `json:"message"`
+	Status         string `json:"status"` // e.g., "processing", "completed", "error", "chunk_update"
+	DetectedLang   string `json:"detected_lang,omitempty"`
+	ChunkIndex     int    `json:"chunk_index,omitempty"`
+	TotalChunks    int    `json:"total_chunks,omitempty"`
+	ChunkStatus    string `json:"chunk_status,omitempty"` // "waiting", "processing", "translated"
+	TranslatedText string `json:"translated_text,omitempty"`
+	DownloadURL    string `json:"download_url,omitempty"`
 }
+
+// Job represents a file to be processed by a worker.
+type Job struct {
+	FilePath  string
+	SessionID string
+	Ext       string
+}
+
+const numWorkers = 4
+
+var jobs = make(chan Job, 100) // Buffered channel for jobs
 
 // Hub maintains the set of active clients and broadcasts messages to the
 // clients.
@@ -90,14 +109,48 @@ func serveWs(w http.ResponseWriter, r *http.Request) {
 }
 
 func main() {
+	// Ensure directories exist
+	os.MkdirAll("uploads", 0755)
+	os.MkdirAll("outputs", 0755)
+
+	startWorkerPool()
 	go hub.run()
 	http.HandleFunc("/", homeHandler)
 	http.HandleFunc("/translate", translateHandler)
+	http.HandleFunc("/download", downloadHandler)
 	http.HandleFunc("/ws", serveWs)
 
 	fmt.Println("Starting server on :8080")
 	if err := http.ListenAndServe(":8080", nil); err != nil {
 		log.Fatal(err)
+	}
+}
+
+func startWorkerPool() {
+	for w := 1; w <= numWorkers; w++ {
+		go worker(w, jobs)
+	}
+}
+
+func worker(id int, jobs <-chan Job) {
+	for job := range jobs {
+		log.Printf("worker %d started job %s", id, job.SessionID)
+		defer os.Remove(job.FilePath) // Clean up the temp file after processing
+
+		var procErr error
+		switch job.Ext {
+		case ".pdf":
+			procErr = processPDF(job.FilePath, job.SessionID)
+		case ".epub":
+			procErr = processEPUB(job.FilePath, job.SessionID)
+		default:
+			hub.broadcast <- Progress{SessionID: job.SessionID, Message: "Unsupported file type: " + job.Ext, Status: "error"}
+		}
+
+		if procErr != nil {
+			hub.broadcast <- Progress{SessionID: job.SessionID, Message: "Error processing file: " + procErr.Error(), Status: "error"}
+		}
+		log.Printf("worker %d finished job %s", id, job.SessionID)
 	}
 }
 
@@ -108,6 +161,18 @@ func homeHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	tmpl.Execute(w, nil)
+}
+
+func downloadHandler(w http.ResponseWriter, r *http.Request) {
+	filename := r.URL.Query().Get("file")
+	if filename == "" {
+		http.Error(w, "Missing file parameter", http.StatusBadRequest)
+		return
+	}
+	// Sanitize filename to prevent directory traversal
+	cleanFilename := filepath.Base(filename)
+	filePath := filepath.Join("outputs", cleanFilename)
+	http.ServeFile(w, r, filePath)
 }
 
 func translateHandler(w http.ResponseWriter, r *http.Request) {
@@ -129,7 +194,6 @@ func translateHandler(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Internal server error: could not create temporary file", http.StatusInternalServerError)
 		return
 	}
-	defer os.Remove(tmpfile.Name()) // clean up
 
 	if _, err = io.Copy(tmpfile, file); err != nil {
 		http.Error(w, "Internal server error: could not save uploaded file", http.StatusInternalServerError)
@@ -142,26 +206,13 @@ func translateHandler(w http.ResponseWriter, r *http.Request) {
 
 	sessionID := handler.Filename // Use filename as a simple session ID for now
 
-	// Start processing in a goroutine
-	go func() {
-		ext := filepath.Ext(handler.Filename)
-		var procErr error
-		switch ext {
-		case ".pdf":
-			procErr = processPDF(tmpfile.Name(), sessionID)
-		case ".epub":
-			procErr = processEPUB(tmpfile.Name(), sessionID)
-		default:
-			hub.broadcast <- Progress{SessionID: sessionID, Message: "Unsupported file type: " + ext, Status: "error"}
-			return
-		}
-
-		if procErr != nil {
-			hub.broadcast <- Progress{SessionID: sessionID, Message: "Error processing file: " + procErr.Error(), Status: "error"}
-			return
-		}
-		hub.broadcast <- Progress{SessionID: sessionID, Message: "File processed successfully.", Status: "completed"}
-	}()
+	// Create a job and send it to the worker pool
+	job := Job{
+		FilePath:  tmpfile.Name(),
+		SessionID: sessionID,
+		Ext:       filepath.Ext(handler.Filename),
+	}
+	jobs <- job
 
 	// Respond to the initial HTTP request immediately
 	w.Header().Set("Content-Type", "application/json")
@@ -184,11 +235,7 @@ func processPDF(filePath string, sessionID string) error {
 	}
 	buf.ReadFrom(b)
 
-	hub.broadcast <- Progress{SessionID: sessionID, Message: "Text extracted. Translating...", Status: "processing"}
-	// Placeholder for translation
-	log.Printf("Extracted Text from %s:\n%s", filePath, buf.String())
-
-	return nil
+	return processText(sessionID, buf.String())
 }
 
 func processEPUB(filePath string, sessionID string) error {
@@ -199,9 +246,64 @@ func processEPUB(filePath string, sessionID string) error {
 		return fmt.Errorf("could not process epub file: %w", err)
 	}
 
-	hub.broadcast <- Progress{SessionID: sessionID, Message: "Text extracted. Translating...", Status: "processing"}
-	// Placeholder for translation
-	log.Printf("Extracted Text from %s:\n%s", filePath, sb.String())
+	return processText(sessionID, sb.String())
+}
+
+func processText(sessionID, text string) error {
+	// 1. Identify Language
+	info := whatlanggo.Detect(text)
+	lang := info.Lang.String()
+
+	hub.broadcast <- Progress{SessionID: sessionID, Message: fmt.Sprintf("Language identified: %s", lang), Status: "processing", DetectedLang: lang}
+
+	// 2. Split into chunks (simple split by newline or period for demo)
+	chunks := strings.Split(text, "\n")
+	var validChunks []string
+	for _, c := range chunks {
+		trimmed := strings.TrimSpace(c)
+		if len(trimmed) > 0 {
+			validChunks = append(validChunks, trimmed)
+		}
+	}
+
+	if len(validChunks) == 0 {
+		validChunks = []string{"No text content found."}
+	}
+
+	total := len(validChunks)
+	hub.broadcast <- Progress{SessionID: sessionID, Message: "Starting translation...", Status: "processing", TotalChunks: total}
+
+	var translatedContent strings.Builder
+
+	// 3. Process chunks
+	for i, chunk := range validChunks {
+		// Notify: Processing
+		hub.broadcast <- Progress{SessionID: sessionID, Status: "chunk_update", ChunkIndex: i, ChunkStatus: "processing"}
+
+		// Simulate translation delay
+		time.Sleep(500 * time.Millisecond)
+		translatedChunk := "[TR] " + chunk // Mock translation
+
+		translatedContent.WriteString(translatedChunk + "\n")
+
+		// Notify: Translated
+		hub.broadcast <- Progress{SessionID: sessionID, Status: "chunk_update", ChunkIndex: i, ChunkStatus: "translated", TranslatedText: translatedChunk}
+	}
+
+	// 4. Save to output file
+	outputFilename := sessionID + ".txt"
+	outputPath := filepath.Join("outputs", outputFilename)
+	if err := os.WriteFile(outputPath, []byte(translatedContent.String()), 0644); err != nil {
+		return fmt.Errorf("could not save translated file: %w", err)
+	}
+
+	// 5. Completion
+	hub.broadcast <- Progress{
+		SessionID:   sessionID,
+		Message:     "Translation completed.",
+		Status:      "completed",
+		DownloadURL: "/download?file=" + outputFilename,
+	}
 
 	return nil
 }

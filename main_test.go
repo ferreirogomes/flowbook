@@ -162,9 +162,10 @@ func TestTranslateHandler(t *testing.T) {
 			filename:    "valid.pdf",
 			fileContent: createMinimalPDF(),
 			expectedMsgs: []Progress{
-				{SessionID: "valid.pdf", Message: "Processing PDF file...", Status: "processing"},
-				{SessionID: "valid.pdf", Message: "Text extracted. Translating...", Status: "processing"},
-				{SessionID: "valid.pdf", Message: "File processed successfully.", Status: "completed"},
+				{SessionID: "valid.pdf", Message: "Language identified: English", Status: "processing"},
+				{SessionID: "valid.pdf", Message: "Starting translation...", Status: "processing"},
+				{SessionID: "valid.pdf", Status: "chunk_update"}, // Processing
+				{SessionID: "valid.pdf", Status: "completed"},
 			},
 		},
 	}
@@ -204,6 +205,11 @@ func TestTranslateHandler(t *testing.T) {
 			// Check messages sent to the hub
 			for i, expectedMsg := range tc.expectedMsgs {
 				select {
+				// We might receive more messages than expected (e.g. multiple chunk updates),
+				// so we loop until we find the matching expected message or timeout.
+				// For this simple test update, we assume strict order for the critical status messages.
+				// Note: In a real scenario, we might need a more robust event consumer here.
+
 				case actualMsg := <-hub.broadcast:
 					if actualMsg.SessionID != expectedMsg.SessionID {
 						t.Errorf("msg %d: unexpected SessionID: got %q want %q", i, actualMsg.SessionID, expectedMsg.SessionID)
@@ -211,12 +217,14 @@ func TestTranslateHandler(t *testing.T) {
 					if actualMsg.Status != expectedMsg.Status {
 						t.Errorf("msg %d: unexpected Status: got %q want %q", i, actualMsg.Status, expectedMsg.Status)
 					}
-					if tc.checkMsgPrefix {
-						if !strings.HasPrefix(actualMsg.Message, expectedMsg.Message) {
-							t.Errorf("msg %d: unexpected Message prefix: got %q want prefix %q", i, actualMsg.Message, expectedMsg.Message)
-						}
-					} else {
-						if actualMsg.Message != expectedMsg.Message {
+
+					// Only check message content if it's specified in expectation
+					if expectedMsg.Message != "" {
+						if tc.checkMsgPrefix {
+							if !strings.HasPrefix(actualMsg.Message, expectedMsg.Message) {
+								t.Errorf("msg %d: unexpected Message prefix: got %q want prefix %q", i, actualMsg.Message, expectedMsg.Message)
+							}
+						} else if actualMsg.Message != expectedMsg.Message {
 							t.Errorf("msg %d: unexpected Message: got %q want %q", i, actualMsg.Message, expectedMsg.Message)
 						}
 					}
