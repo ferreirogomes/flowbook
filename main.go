@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"html/template"
@@ -14,10 +15,14 @@ import (
 	"sync"
 	"time"
 
+	"cloud.google.com/go/translate"
 	"github.com/abadojack/whatlanggo"
 	"github.com/gorilla/websocket"
 	"github.com/ledongthuc/pdf"
 	"github.com/wmentor/epub"
+	"golang.org/x/text/language"
+	"golang.org/x/time/rate"
+	"google.golang.org/api/option"
 )
 
 // Progress message for WebSocket communication
@@ -47,6 +52,9 @@ const chunkBatchSize = 10                                // Process 10 chunks at
 const simulatedChunkProcessTime = 100 * time.Millisecond // Time to process one chunk (for estimation)
 
 var jobs = make(chan Job, 100) // Buffered channel for jobs
+
+// Global rate limiter to respect API quotas (e.g., 10 requests/second)
+var apiLimiter = rate.NewLimiter(rate.Every(100*time.Millisecond), 1)
 
 const (
 	// Time allowed to write a message to the peer.
@@ -347,6 +355,21 @@ func processText(sessionID, text string) error {
 	info := whatlanggo.Detect(text)
 	lang := info.Lang.String()
 
+	// Initialize Google Translate Client
+	ctx := context.Background()
+	var client *translate.Client
+	var err error
+
+	if apiKey := os.Getenv("GOOGLE_API_KEY"); apiKey != "" {
+		client, err = translate.NewClient(ctx, option.WithAPIKey(apiKey))
+	} else {
+		client, err = translate.NewClient(ctx)
+	}
+	if err != nil {
+		return fmt.Errorf("failed to create translate client: %v", err)
+	}
+	defer client.Close()
+
 	hub.broadcast <- Progress{SessionID: sessionID, Message: fmt.Sprintf("Language identified: %s", lang), Status: "processing", DetectedLang: lang}
 
 	// 2. Split into chunks (simple split by newline or period for demo)
@@ -385,17 +408,25 @@ func processText(sessionID, text string) error {
 			hub.broadcast <- Progress{SessionID: sessionID, Status: "chunk_update", ChunkIndex: j, ChunkStatus: "processing"}
 		}
 
-		// Simulate translation delay for the batch
-		time.Sleep(time.Duration(len(batch)) * simulatedChunkProcessTime)
+		// Wait for rate limiter to avoid hitting API quotas
+		if err := apiLimiter.Wait(ctx); err != nil {
+			return fmt.Errorf("rate limiter error: %v", err)
+		}
 
-		for j, chunk := range batch {
+		// Perform Translation
+		resp, err := client.Translate(ctx, batch, language.Make("pt-BR"), nil)
+		if err != nil {
+			return fmt.Errorf("translation failed: %v", err)
+		}
+
+		for j, translation := range resp {
 			// Notify: Processing
-			translatedChunk := "[PT-BR] " + chunk // Mock translation
+			translatedChunk := translation.Text
 			translatedContent.WriteString(translatedChunk + "\n")
 			processedChunks++
 
 			// Notify: Translated
-			hub.broadcast <- Progress{SessionID: sessionID, Status: "chunk_update", ChunkIndex: i + j, ChunkStatus: "translated", TranslatedText: translatedChunk, OriginalText: chunk}
+			hub.broadcast <- Progress{SessionID: sessionID, Status: "chunk_update", ChunkIndex: i + j, ChunkStatus: "translated", TranslatedText: translatedChunk, OriginalText: batch[j]}
 		}
 	}
 

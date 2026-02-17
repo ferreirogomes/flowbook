@@ -3,10 +3,14 @@ module flowbook
 go 1.25.6
 
 require (
+	cloud.google.com/go/translate v1.10.0
 	github.com/abadojack/whatlanggo v1.0.1
 	github.com/gorilla/websocket v1.5.3
 	github.com/ledongthuc/pdf v0.0.0-20250511090121-5959a4027728
 	github.com/wmentor/epub v1.0.1
+	golang.org/x/text v0.22.0
+	golang.org/x/time v0.5.0
+	google.golang.org/api v0.169.0
 )
 
 require (
