@@ -366,7 +366,7 @@ func processText(sessionID, text string) error {
 	// Calculate estimated time: (total chunks) * simulatedChunkProcessTime
 	estimatedTime := time.Duration(totalChunks) * simulatedChunkProcessTime
 
-	hub.broadcast <- Progress{SessionID: sessionID, Message: "Starting translation...", Status: "processing", TotalChunks: totalChunks, EstimatedTime: estimatedTime.String()}
+	hub.broadcast <- Progress{SessionID: sessionID, Message: "Starting translation to Portuguese (Brazil)...", Status: "processing", TotalChunks: totalChunks, EstimatedTime: estimatedTime.String()}
 
 	var translatedContent strings.Builder
 	processedChunks := 0
@@ -389,7 +389,7 @@ func processText(sessionID, text string) error {
 
 		for j, chunk := range batch {
 			// Notify: Processing
-			translatedChunk := "[TR] " + chunk // Mock translation
+			translatedChunk := "[PT-BR] " + chunk // Mock translation
 			translatedContent.WriteString(translatedChunk + "\n")
 			processedChunks++
 

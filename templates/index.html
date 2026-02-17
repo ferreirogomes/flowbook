@@ -4,66 +4,148 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>FlowBook Translator</title>
+    <link href="https://fonts.googleapis.com/css2?family=Crimson+Text:ital,wght@0,400;0,600;0,700;1,400&display=swap" rel="stylesheet">
     <style>
-        body { font-family: sans-serif; max-width: 800px; margin: 0 auto; padding: 20px; background-color: #f4f4f9; }
-        .container { background: white; padding: 30px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+        body { 
+            font-family: 'Crimson Text', serif; 
+            margin: 0; 
+            padding: 40px; 
+            background-color: #f5e6d3; 
+            color: #2c2c2c;
+            background-image: url("data:image/svg+xml,%3Csvg width='100' height='100' viewBox='0 0 100 100' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M11 18c3.866 0 7-3.134 7-7s-3.134-7-7-7-7 3.134-7 7 3.134 7 7 7zm48 25c3.866 0 7-3.134 7-7s-3.134-7-7-7-7 3.134-7 7 3.134 7 7 7zm-43-7c1.657 0 3-1.343 3-3s-1.343-3-3-3-3 1.343-3 3 1.343 3 3 3zm63 31c1.657 0 3-1.343 3-3s-1.343-3-3-3-3 1.343-3 3 1.343 3 3 3zM34 90c1.657 0 3-1.343 3-3s-1.343-3-3-3-3 1.343-3 3 1.343 3 3 3zm56-76c1.657 0 3-1.343 3-3s-1.343-3-3-3-3 1.343-3 3 1.343 3 3 3zM12 86c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm28-65c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm23-11c2.76 0 5-2.24 5-5s-2.24-5-5-5-5 2.24-5 5 2.24 5 5 5zm-6 60c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm29 22c2.76 0 5-2.24 5-5s-2.24-5-5-5-5 2.24-5 5 2.24 5 5 5zM32 63c2.76 0 5-2.24 5-5s-2.24-5-5-5-5 2.24-5 5 2.24 5 5 5zm57-13c2.76 0 5-2.24 5-5s-2.24-5-5-5-5 2.24-5 5 2.24 5 5 5zm-9-21c1.105 0 2-.895 2-2s-.895-2-2-2-2 .895-2 2 .895 2 2 2zM60 91c1.105 0 2-.895 2-2s-.895-2-2-2-2 .895-2 2 .895 2 2 2zM35 41c1.105 0 2-.895 2-2s-.895-2-2-2-2 .895-2 2 .895 2 2 2zM12 60c1.105 0 2-.895 2-2s-.895-2-2-2-2 .895-2 2 .895 2 2 2z' fill='%23d4c5b0' fill-opacity='0.4' fill-rule='evenodd'/%3E%3C/svg%3E");
+        }
+        .container { 
+            background: #fffcf5; 
+            max-width: 800px; 
+            margin: 0 auto; 
+            padding: 50px; 
+            border: 1px solid #dcd3c5; 
+            box-shadow: 0 0 0 5px #fffcf5, 0 0 0 6px #dcd3c5, 5px 5px 15px rgba(0,0,0,0.1);
+            position: relative;
+        }
+        .container::before {
+            content: "";
+            display: block;
+            border-top: 2px solid #2c2c2c;
+            border-bottom: 1px solid #2c2c2c;
+            height: 3px;
+            margin-bottom: 30px;
+        }
+        h1 {
+            text-align: center;
+            font-weight: 700;
+            font-size: 2.5em;
+            margin-bottom: 10px;
+            letter-spacing: 1px;
+            text-transform: uppercase;
+        }
+        p.subtitle {
+            text-align: center;
+            font-style: italic;
+            color: #555;
+            margin-bottom: 40px;
+            font-size: 1.1em;
+        }
         
         /* Drag and Drop Zone */
         #drop-zone {
-            border: 2px dashed #ccc;
-            border-radius: 10px;
-            padding: 40px;
+            border: 2px dashed #8b7d6b;
+            background-color: #f4f0e6;
+            border-radius: 4px;
+            padding: 60px;
             text-align: center;
-            color: #666;
-            transition: border-color 0.3s, background-color 0.3s;
+            color: #8b7d6b;
+            transition: all 0.3s;
             cursor: pointer;
             margin-bottom: 20px;
+            font-size: 1.2em;
         }
-        #drop-zone.dragover { border-color: #3498db; background-color: #ebf5fb; }
+        #drop-zone:hover, #drop-zone.dragover { background-color: #e8e2d2; border-color: #5d4037; color: #5d4037; }
         #file-input { display: none; }
 
         /* Status & Info */
         #status-area { margin-top: 20px; display: none; }
-        .info-bar { display: flex; justify-content: space-between; flex-wrap: wrap; margin-bottom: 15px; font-weight: bold; color: #333; }
+        .info-bar { 
+            display: flex; 
+            justify-content: space-between; 
+            flex-wrap: wrap; 
+            margin-bottom: 15px; 
+            font-weight: bold; 
+            color: #333;
+            border-top: 1px solid #dcd3c5;
+            border-bottom: 1px solid #dcd3c5;
+            padding: 15px 0;
+        }
         .info-bar > span { margin-right: 15px; margin-bottom: 5px; }
         
         /* Progress Bar */
-        .progress-container { width: 100%; background-color: #e0e0e0; border-radius: 5px; margin-bottom: 15px; }
+        .progress-container { width: 100%; background-color: #e8e2d2; border-radius: 2px; margin-bottom: 15px; border: 1px solid #dcd3c5; height: 10px; }
         .progress-bar {
-            width: 0%; height: 20px; background-color: #4CAF50; border-radius: 5px;
-            text-align: center; line-height: 20px; color: white; font-size: 0.9em;
-            transition: width 0.5s ease-in-out;
+            width: 0%; height: 100%; background-color: #8b7d6b; border-radius: 1px;
+            text-align: center; line-height: 10px; color: transparent; font-size: 0.9em;
+            transition: width 0.5s ease;
         }
 
         /* Chunk Grid */
         .chunk-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(30px, 1fr)); gap: 5px; margin-top: 20px; }
         .chunk-card {
-            width: 30px; height: 30px; border: 1px solid #ddd; border-radius: 3px;
+            width: 30px; height: 30px; border: 1px solid #dcd3c5; border-radius: 2px;
             font-size: 0.7em; display: flex; align-items: center; justify-content: center;
             transition: background 0.3s;
             position: relative;
             cursor: help; /* Indicate hover for title */
+            background: #fff;
+            box-shadow: 1px 1px 3px rgba(0,0,0,0.05);
         }
-        .chunk-card.waiting { background: #f0f0f0; color: #888; }
-        .chunk-card.processing { background: #fff3cd; border-color: #ffeeba; color: #856404; }
-        .chunk-card.translated { background: #d4edda; border-color: #c3e6cb; color: #155724; }
+        .chunk-card.waiting { background: #f9f7f1; color: #aaa; }
+        .chunk-card.processing { background: #fff8e1; border-color: #eecfa1; color: #8d6e63; }
+        .chunk-card.translated { background: #dcedc8; border-color: #aed581; color: #33691e; }
         
         /* Download Button */
         #download-btn {
-            display: none; width: 100%; padding: 15px; background-color: #28a745; color: white;
-            text-align: center; text-decoration: none; font-size: 1.2em; border-radius: 5px; margin-top: 20px;
+            display: none; width: 100%; padding: 15px; background-color: #5d4037; color: #fffcf5;
+            text-align: center; text-decoration: none; font-size: 1.2em; border-radius: 2px; margin-top: 30px;
+            text-transform: uppercase; letter-spacing: 1px; box-shadow: 0 4px 6px rgba(0,0,0,0.2);
+            box-sizing: border-box;
         }
-        #download-btn:hover { background-color: #218838; }
+        #download-btn:hover { background-color: #3e2723; }
+
+        /* Preview Area */
+        #preview-container {
+            margin-top: 30px;
+            border: 1px solid #dcd3c5;
+            background: #fffcf5;
+            padding: 25px;
+            box-shadow: inset 0 0 30px rgba(139, 125, 107, 0.1);
+            display: none;
+            position: relative;
+        }
+        #preview-container::before {
+            content: "TRANSLATION PREVIEW (First 5 Chunks)";
+            position: absolute;
+            top: -10px;
+            left: 20px;
+            background: #fffcf5;
+            padding: 0 10px;
+            font-size: 0.8em;
+            color: #8b7d6b;
+            font-weight: bold;
+            letter-spacing: 1px;
+        }
+        #preview-content p {
+            margin-bottom: 0.5em;
+            text-indent: 1em;
+        }
     </style>
 </head>
 <body>
 
 <div class="container">
     <h1>FlowBook Translator</h1>
-    <p>Drag & drop your PDF or EPUB file to translate.</p>
+    <p class="subtitle">Honoring the author's distinct voice through sophisticated neural cross-lingual mapping.</p>
 
     <div id="drop-zone">
-        <p>Drag file here or click to upload</p>
+        <p>Drag your manuscript here or click to upload</p>
         <input type="file" id="file-input" accept=".pdf,.epub">
     </div>
 
@@ -76,6 +158,9 @@
         </div>
         <div class="progress-container">
             <div class="progress-bar" id="global-progress-bar">0%</div>
+        </div>
+        <div id="preview-container">
+            <div id="preview-content"></div>
         </div>
         <div id="chunk-container" class="chunk-grid"></div>
         <a id="download-btn" href="#" target="_blank">Download Translated File</a>
@@ -92,6 +177,8 @@
     const estimatedTimeDisplay = document.getElementById('estimated-time-display');
     const progressDisplay = document.getElementById('progress-display');
     const globalProgressBar = document.getElementById('global-progress-bar');
+    const previewContainer = document.getElementById('preview-container');
+    const previewContent = document.getElementById('preview-content');
     const downloadBtn = document.getElementById('download-btn');
 
     let socket;
@@ -121,6 +208,8 @@
         progressDisplay.textContent = "Status: Uploading...";
         globalProgressBar.style.width = '0%';
         globalProgressBar.textContent = '0%';
+        previewContainer.style.display = 'none';
+        previewContent.innerHTML = '';
         totalChunks = 0;
         translatedChunks = 0;
 
@@ -200,6 +289,32 @@
                     translatedChunks++;
                     updateGlobalProgress();
                     el.title = msg.translated_text; // Show translated text on hover
+
+                    // Update Preview (First 5 chunks)
+                    if (msg.chunk_index < 5) {
+                        previewContainer.style.display = 'block';
+                        // Check if paragraph already exists to avoid duplicates
+                        if (!document.getElementById(`preview-p-${msg.chunk_index}`)) {
+                            const p = document.createElement('p');
+                            p.id = `preview-p-${msg.chunk_index}`;
+                            p.textContent = msg.translated_text;
+                            
+                            // Insert in order
+                            const paragraphs = previewContent.children;
+                            let inserted = false;
+                            for (let i = 0; i < paragraphs.length; i++) {
+                                const idx = parseInt(paragraphs[i].id.replace('preview-p-', ''), 10);
+                                if (msg.chunk_index < idx) {
+                                    previewContent.insertBefore(p, paragraphs[i]);
+                                    inserted = true;
+                                    break;
+                                }
+                            }
+                            if (!inserted) {
+                                previewContent.appendChild(p);
+                            }
+                        }
+                    }
                 }
             }
         }
