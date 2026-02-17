@@ -53,7 +53,9 @@ func (h *Hub) run() {
 			h.mutex.Lock()
 			if _, ok := h.clients[conn.RemoteAddr().String()]; ok {
 				delete(h.clients, conn.RemoteAddr().String())
-				close(conn.CloseHandler())
+				if err := conn.Close(); err != nil {
+					log.Printf("error closing connection: %v", err)
+				}
 			}
 			h.mutex.Unlock()
 		case progress := <-h.broadcast:
@@ -176,11 +178,11 @@ func processPDF(filePath string, sessionID string) error {
 	defer f.Close()
 
 	var buf bytes.Buffer
-    b, err := r.GetPlainText()
-    if err != nil {
+	b, err := r.GetPlainText()
+	if err != nil {
 		return fmt.Errorf("could not get plain text from pdf: %w", err)
-    }
-    buf.ReadFrom(b)
+	}
+	buf.ReadFrom(b)
 
 	hub.broadcast <- Progress{SessionID: sessionID, Message: "Text extracted. Translating...", Status: "processing"}
 	// Placeholder for translation
@@ -203,4 +205,3 @@ func processEPUB(filePath string, sessionID string) error {
 
 	return nil
 }
-
